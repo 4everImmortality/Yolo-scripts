@@ -19,35 +19,44 @@ def yolo2coco(arg):
     assert os.path.exists(arg.image_path)
     assert os.path.exists(arg.label_path)
     
-    originImagesDir = arg.image_path                                   
+    originImagesDir = arg.image_path
     originLabelsDir = arg.label_path
-    # images dir name
     indexes = os.listdir(originImagesDir)
 
     dataset = {'categories': [], 'annotations': [], 'images': []}
     for i, cls in enumerate(classes, 0):
         dataset['categories'].append({'id': i, 'name': cls, 'supercategory': 'mark'})
     
-    # 标注的id
+    # 标注的id从0开始
     ann_id_cnt = 0
     for k, index in enumerate(tqdm(indexes)):
-        # 支持 png jpg 格式的图片.
+        # 支持 png, jpg, irp 等格式的图片.
+        # k 将作为这张图片的唯一整数ID
+        image_id = k
+        
+        # 构造标签文件名
         txtFile = f'{index[:index.rfind(".")]}.txt'
-        stem = index[:index.rfind(".")]
+
         # 读取图像的宽和高
         try:
             im = cv2.imread(os.path.join(originImagesDir, index))
             height, width, _ = im.shape
         except Exception as e:
-            print(f'{os.path.join(originImagesDir, index)} read error.\nerror:{e}')
-        # 添加图像的信息
+            print(f'Error reading {os.path.join(originImagesDir, index)}: {e}')
+            continue # 如果图片读取失败，跳过这张图
+
+        # 将图片信息首先添加进去，并使用整数k作为id
+        dataset['images'].append({
+            'file_name': index,
+            'id': image_id,  # 使用整数 ID
+            'width': width,
+            'height': height
+        })
+
+        # 如果对应的标签文件不存在，则跳过后续的标注处理步骤
         if not os.path.exists(os.path.join(originLabelsDir, txtFile)):
-            # 如没标签，跳过，只保留图片信息.
             continue
-        dataset['images'].append({'file_name': index,
-                            'id': stem,
-                            'width': width,
-                            'height': height})
+            
         with open(os.path.join(originLabelsDir, txtFile), 'r') as fr:
             labelList = fr.readlines()
             for label in labelList:
@@ -63,18 +72,19 @@ def yolo2coco(arg):
                 y1 = (y - h / 2) * H
                 x2 = (x + w / 2) * W
                 y2 = (y + h / 2) * H
-                # 标签序号从0开始计算, coco2017数据集标号混乱，不管它了。
-                cls_id = int(label[0])   
-                width = max(0, x2 - x1)
-                height = max(0, y2 - y1)
+                
+                cls_id = int(label[0])
+                bbox_width = max(0, x2 - x1)
+                bbox_height = max(0, y2 - y1)
+
+                # 在annotations中，使用整数k作为image_id
                 dataset['annotations'].append({
-                    'area': width * height,
-                    'bbox': [x1, y1, width, height],
+                    'area': bbox_width * bbox_height,
+                    'bbox': [x1, y1, bbox_width, bbox_height],
                     'category_id': cls_id,
                     'id': ann_id_cnt,
-                    'image_id': stem,
+                    'image_id': image_id,  # 使用和上面images中对应的整数 ID
                     'iscrowd': 0,
-                    # mask, 矩形是从左上角点按顺时针的四个顶点
                     'segmentation': [[x1, y1, x2, y1, x2, y2, x1, y2]]
                 })
                 ann_id_cnt += 1
